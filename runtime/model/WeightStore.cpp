@@ -59,11 +59,16 @@ uint64_t q4PackedBytes(uint32_t outputSize, uint32_t inputSize) {
     return checkedWeightMultiply(elements / 16, 9, "Q4 packed byte count");
 }
 
-void validateQ4Layout(uint32_t outputSize, uint32_t inputSize) {
+void validateQ4Layout(uint32_t outputSize, uint32_t inputSize,
+                      uint32_t storageN) {
     static_cast<void>(q4Elements(outputSize, inputSize));
-    if (outputSize % kQ4StorageN) {
+    if (storageN != kQ4StorageN && storageN != kQ4ExpertStorageN) {
+        throw WeightStoreError("unsupported Q4 StorageN");
+    }
+    if (outputSize % storageN) {
         throw WeightStoreError(
-            "Q4 output dimension is incompatible with StorageN=256");
+            "Q4 output dimension is incompatible with StorageN=" +
+            std::to_string(storageN));
     }
 }
 

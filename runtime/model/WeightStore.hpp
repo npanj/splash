@@ -19,6 +19,14 @@ inline constexpr uint64_t kBFloat16Bytes = 2;
 inline constexpr uint64_t kWeightFileAlignment = 16 * 1024;
 inline constexpr uint32_t kQ4StorageN = 256;
 
+// Expert projections tile at a narrower width. Qwen3.8-Flash-Next's experts
+// are 640 wide, which is not a multiple of 256 but is a multiple of 128, so
+// tiling them at 128 stores them exactly instead of padding 640 up to 768 -
+// about 12.7 GiB of zeros across that model's 48 layers. The Metal tiles
+// already take this width as a template parameter and 128 is a whole number
+// of TileN=32 slices, so only the packed layout and this check change.
+inline constexpr uint32_t kQ4ExpertStorageN = 128;
+
 class WeightStoreError : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;
@@ -58,7 +66,8 @@ private:
                                              std::string_view description);
 [[nodiscard]] uint64_t q4PackedBytes(uint32_t outputSize,
                                      uint32_t inputSize);
-void validateQ4Layout(uint32_t outputSize, uint32_t inputSize);
+void validateQ4Layout(uint32_t outputSize, uint32_t inputSize,
+                      uint32_t storageN = kQ4StorageN);
 
 [[nodiscard]] ops::Q4Projection
 readQ4Projection(WeightFile &file, metal::MetalBackend &backend,

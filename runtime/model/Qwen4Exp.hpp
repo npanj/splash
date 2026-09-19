@@ -49,6 +49,10 @@ struct Qwen4ExpLayout final {
   uint32_t experts = 512;
   uint32_t expertsPerToken = 10;
   uint32_t expertIntermediateSize = 640;
+  // 640 is not a multiple of 256 but is a multiple of 128, so the expert
+  // projections tile narrower than everything else rather than padding to
+  // 768. See kQ4ExpertStorageN.
+  uint32_t expertStorageN = kQ4ExpertStorageN;
 
   // TODO(qwen4exp): confirm against the shipped tokenizer; the vocabulary
   // matches Qwen3.8 exactly, so these are carried over as placeholders.
@@ -100,16 +104,14 @@ struct Qwen4ExpLayout final {
   bool operator==(const Qwen4ExpLayout &) const = default;
 };
 
-// Two constraints this architecture breaks today. Both are engine limits, not
-// properties of the weights, and both must be lifted before a package loads.
+// One constraint this architecture still breaks. It is an engine limit, not a
+// property of the weights, and it must be lifted before a package loads:
+// ops::MoE accepts at most 256 experts, and the router kernel stages 256
+// scores per row before sorting them.
 //
-//   experts = 512            ops::MoE accepts at most 256, and the router
-//                            kernel stages 256 scores per row.
-//   expertIntermediateSize   640 is not a multiple of StorageN = 256, so the
-//     = 640                  expert projections cannot use the Q4 layout
-//                            without padding to 768 (a 20% waste) or a
-//                            kernel that accepts group 128.
+// The expert width no longer belongs on this list. 640 is expressible exactly
+// at kQ4ExpertStorageN = 128; what remains is a MoE kernel instantiated at
+// that width, which is Stage 3 work.
 inline constexpr uint32_t kUnsupportedExpertCount = 512;
-inline constexpr uint32_t kUnsupportedExpertIntermediateSize = 640;
 
 } // namespace splash::model

@@ -15,9 +15,10 @@ void require(bool condition, const char *message) {
 
 // Mirrors validateQ4Layout, which lives in WeightStore.cpp and would pull
 // Metal into what is otherwise a pure arithmetic test.
-constexpr bool q4LayoutIsValid(uint32_t outputSize, uint32_t inputSize) {
+constexpr bool q4LayoutIsValid(uint32_t outputSize, uint32_t inputSize,
+                               uint32_t storageN = kQ4StorageN) {
   return outputSize && inputSize && inputSize % kQ4GroupElements == 0 &&
-         outputSize % kQ4StorageN == 0;
+         outputSize % storageN == 0;
 }
 
 // The packed widths are derived, not transcribed: a concatenation padded up
@@ -88,30 +89,46 @@ void supportedProjectionsAreQ4Aligned() {
           "hidden size must be StorageN-aligned as a projection output");
 }
 
-// The two gaps, asserted rather than described, so that lifting either limit
-// fails this test and forces the constant here to be revisited.
-void expertDimensionsAreStillUnsupported() {
+// Expert projections tile narrower than everything else. This is the whole
+// reason kQ4ExpertStorageN exists, so pin both directions.
+void expertProjectionsTileAt128() {
   constexpr Qwen4ExpLayout layout;
+  static_assert(layout.expertStorageN == kQ4ExpertStorageN);
 
+  // 640 is not expressible at the usual width, which is why it tiles narrower.
+  static_assert(!q4LayoutIsValid(layout.expertIntermediateSize,
+                                 layout.hiddenSize, kQ4StorageN),
+                "640 must not be expressible at StorageN 256");
+  static_assert(q4LayoutIsValid(layout.expertIntermediateSize,
+                                layout.hiddenSize, kQ4ExpertStorageN),
+                "640 must be expressible at StorageN 128");
+  static_assert(q4LayoutIsValid(layout.hiddenSize,
+                                layout.expertIntermediateSize,
+                                kQ4ExpertStorageN),
+                "the down projection must tile at 128 as well");
+
+  // The narrower tile must still be a whole number of 32-wide matmul slices.
+  static_assert(kQ4ExpertStorageN % 32 == 0);
+  static_assert(kQ4StorageN % kQ4ExpertStorageN == 0);
+
+  // What padding to the usual width would have cost, for the record: three
+  // projections per expert, 512 experts, 48 layers, at 9 bytes per 16 weights.
+  constexpr uint64_t stored =
+      uint64_t(layout.expertIntermediateSize) * layout.hiddenSize * 3 *
+      layout.experts * layout.layers * 9 / 16;
+  constexpr uint64_t padded = uint64_t(768) * layout.hiddenSize * 3 *
+                              layout.experts * layout.layers * 9 / 16;
+  require(padded - stored > 12ULL * 1024 * 1024 * 1024,
+          "padding to 768 would have cost more than 12 GiB");
+}
+
+// The one gap that remains, asserted rather than described, so that lifting
+// the limit fails this test and forces the constant here to be revisited.
+void expertCountIsStillUnsupported() {
+  constexpr Qwen4ExpLayout layout;
   require(layout.experts == kUnsupportedExpertCount, "expert count changed");
   require(layout.experts > 256,
           "ops::MoE accepts at most 256 experts; update this test if lifted");
-
-  require(layout.expertIntermediateSize == kUnsupportedExpertIntermediateSize,
-          "expert intermediate size changed");
-  require(layout.expertIntermediateSize % kQ4StorageN != 0,
-          "expert intermediate size is now StorageN-aligned; update this test");
-
-  // Concretely: the expert projections cannot be written in the Q4 layout.
-  static_assert(!q4LayoutIsValid(Qwen4ExpLayout{}.expertIntermediateSize,
-                                 Qwen4ExpLayout{}.hiddenSize),
-                "expert projections must still fail the Q4 rules");
-
-  // Padding 640 up to the next StorageN multiple costs 20%.
-  constexpr uint32_t padded = 768;
-  static_assert(padded % kQ4StorageN == 0);
-  require(padded * 100 / layout.expertIntermediateSize == 120,
-          "padding 640 to 768 is a 20% increase");
 }
 
 void stateLayoutsAreConsistent() {
@@ -145,7 +162,8 @@ int main() {
     packedWidthsFollowFromTheConcatenation();
     linearAttentionMatchesQwen38();
     supportedProjectionsAreQ4Aligned();
-    expertDimensionsAreStillUnsupported();
+    expertProjectionsTileAt128();
+    expertCountIsStillUnsupported();
     stateLayoutsAreConsistent();
   } catch (const std::exception &error) {
     std::cerr << "qwen4exp layout test failed: " << error.what() << '\n';

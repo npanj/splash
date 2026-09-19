@@ -1,5 +1,7 @@
 #include "model/QwenTarget.hpp"
 
+#include "model/Qwen4Exp.hpp"
+
 #include "model/Qwen3_6Moe.hpp"
 #include "model/Qwen3_8.hpp"
 #include "ops/DraftAttention.hpp"
@@ -50,6 +52,14 @@ QwenTargetGeometry geometryFor(const Qwen3_8Layout &layout) {
   QwenTargetGeometry result = commonGeometry(layout);
   result.denseIntermediateSize = layout.intermediateSize;
   result.ffnKind = QwenFfnKind::Dense;
+  return result;
+}
+
+QwenTargetGeometry geometryFor(const Qwen4ExpLayout &layout) {
+  QwenTargetGeometry result = commonGeometry(layout);
+  result.moe = {layout.hiddenSize, layout.experts, layout.expertsPerToken,
+                layout.expertIntermediateSize};
+  result.ffnKind = QwenFfnKind::SparseMoe;
   return result;
 }
 
@@ -153,6 +163,10 @@ QwenTargetGeometry qwenTargetGeometry(const Qwen3_8Weights &weights) {
 }
 
 QwenTargetGeometry qwenTargetGeometry(const Qwen3_6MoeWeights &weights) {
+  return geometryFor(weights.layout);
+}
+
+QwenTargetGeometry qwenTargetGeometry(const Qwen4ExpWeights &weights) {
   return geometryFor(weights.layout);
 }
 

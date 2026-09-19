@@ -288,10 +288,10 @@ ops::Q8Projection readQ8Projection(WeightFile &file,
 ops::ExpertQ4Projection
 readExpertQ4Projection(WeightFile &file, uint32_t experts,
                        uint32_t outputSize, uint32_t inputSize,
-                       std::string_view label) {
+                       std::string_view label, uint32_t storageN) {
     if (!experts)
         throw WeightStoreError("expert projection requires experts");
-    validateQ4Layout(outputSize, inputSize);
+    validateQ4Layout(outputSize, inputSize, storageN);
     const uint64_t stride = q4PackedBytes(outputSize, inputSize);
     return {
         file.section(checkedWeightMultiply(experts, stride,

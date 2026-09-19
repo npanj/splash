@@ -9,7 +9,11 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace splash::model {
 
@@ -59,14 +63,20 @@ struct Qwen4ExpLayout final {
   uint32_t maskToken = 248070;
   std::array<uint32_t, 2> stopTokens{248044, 248046};
 
-  // ---- no Splash equivalent; recorded, not executable -------------------
+  // ---- no operator yet; the weights are still described and mapped ------
   uint32_t hyperConnectionCount = 4;
   uint32_t hyperConnectionLowRank = 320;
   uint32_t indexerHeads = 4;
+  uint32_t indexerKvHeads = 1;
   uint32_t indexerHeadDimension = 128;
   uint32_t indexerBudget = 2048;
+  // The n-gram table is a Q4 lookup table on one layer, not a per-layer cost:
+  // 20,000,000 rows of 2560 at nine bytes per sixteen weights is 26.8 GiB,
+  // which is what this model measures on disk.
   uint32_t ngramSize = 3;
   uint32_t ngramLayer = 1;
+  uint32_t ngramVocabularySize = 20'000'000;
+  uint32_t ngramEmbeddingSize = 2560;
 
   [[nodiscard]] constexpr bool
   isFullAttentionLayer(uint32_t layer) const noexcept {
@@ -100,9 +110,74 @@ struct Qwen4ExpLayout final {
   [[nodiscard]] constexpr uint32_t capturedHiddenSize() const noexcept {
     return hiddenSize * hiddenCaptureLayers.size();
   }
+  // Four residual streams, so every hyper-connection tensor is this wide.
+  [[nodiscard]] constexpr uint32_t hyperConnectionWidth() const noexcept {
+    return hiddenSize * hyperConnectionCount;
+  }
+  // Query and key-value share one indexer projection, as in the reference.
+  [[nodiscard]] constexpr uint32_t indexerProjectionWidth() const noexcept {
+    return (indexerHeads + indexerKvHeads) * indexerHeadDimension;
+  }
 
   bool operator==(const Qwen4ExpLayout &) const = default;
 };
+
+// Hyper-connections replace the usual input and post-attention norms: each
+// block carries its own norm plus a low-rank mix of the four residual
+// streams. The mix projections are stored bf16, not Q4: the down projection
+// is 320 wide, which is not a multiple of either tile width.
+struct Qwen4ExpHyperConnection final {
+  metal::MetalBuffer norm;         // hyperConnectionWidth
+  metal::MetalBuffer blockInject;  // count x hyperConnectionWidth
+  metal::MetalBuffer mixDown;      // lowRank x hyperConnectionWidth
+  metal::MetalBuffer mixUp;        // hyperConnectionWidth x lowRank
+};
+
+// Sparse attention keeps an indexer that scores which keys to read.
+struct Qwen4ExpIndexer final {
+  ops::Q4Projection queryKeyProjection;  // indexerProjectionWidth x hidden
+  metal::MetalBuffer queryNorm;          // indexerHeadDimension
+  metal::MetalBuffer keyNorm;            // indexerHeadDimension
+};
+
+// Section order per layer file, which the packer must follow exactly:
+//
+//   attention hyper-connection   norm, inject, mix down, mix up
+//   mixer                        GDN or sparse attention, as Qwen3.8
+//   indexer                      attention layers only
+//   mlp hyper-connection         norm, inject, mix down, mix up
+//   experts                      router, gate, up, down, shared x3, gate
+struct Qwen4ExpLayerWeights final {
+  Qwen4ExpHyperConnection attentionHyperConnection;
+  QwenMixerWeights mixer;
+  std::optional<Qwen4ExpIndexer> indexer;
+  Qwen4ExpHyperConnection mlpHyperConnection;
+  ops::MoeWeights ffn;
+};
+
+struct Qwen4ExpWeights final {
+  Qwen4ExpLayout layout;
+  std::vector<Qwen4ExpLayerWeights> layers;
+  Qwen4ExpHyperConnection hyperConnectionMixer;
+  metal::MetalBuffer finalNorm;
+  ops::Q4Projection logitsProjection;
+  ops::Q4Projection tokenEmbedding;
+  // Its own file: 26.8 GiB does not belong inside a layer.
+  ops::Q4Projection ngramEmbedding;
+  std::vector<WeightFileRecord> files;
+  uint64_t actualAllocatedBytes = 0;
+  std::string manifestFingerprintSha256;
+};
+
+// Defined in QwenTarget.cpp beside the other two, so all three share
+// commonGeometry.
+[[nodiscard]] QwenTargetGeometry
+qwenTargetGeometry(const Qwen4ExpWeights &weights);
+
+[[nodiscard]] Qwen4ExpWeights
+loadQwen4ExpWeights(metal::MetalBackend &backend,
+                    const std::filesystem::path &directory,
+                    Qwen4ExpLayout layout = {});
 
 // One constraint this architecture still breaks. It is an engine limit, not a
 // property of the weights, and it must be lifted before a package loads:

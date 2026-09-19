@@ -168,6 +168,29 @@ DFlashDraftLayout qwen36DraftLayout() {
   return layout;
 }
 
+// Provisional, like Qwen4ExpLayout::hiddenCaptureLayers: no DFlash 2 draft
+// has been trained for this target, so these are the smallest values that
+// satisfy the draft loader's alignment rules at hidden size 2560.
+DFlashDraftLayout qwen4expDraftLayout() {
+  DFlashDraftLayout layout;
+  layout.layers = 5;
+  layout.hiddenSize = 2560;
+  layout.dynamicSize = 768;
+  layout.qkvSize = 3072;
+  layout.attentionSize = 2048;
+  layout.intermediateSize = 8704;
+  layout.targetHiddenSize = Qwen4ExpLayout{}.capturedHiddenSize();
+  return layout;
+}
+
+ModelDescriptor qwen4expDescriptor(std::string name) {
+  constexpr Qwen4ExpLayout target;
+  ops::VisionLayout vision;
+  vision.outputHiddenSize = target.hiddenSize;
+  return makeModelDescriptor(std::move(name), target, qwen4expDraftLayout(),
+                             vision);
+}
+
 ModelDescriptor qwen38Descriptor(std::string name) {
   return makeModelDescriptor(std::move(name), Qwen3_8Layout{},
                              DFlashDraftLayout{}, ops::VisionLayout{});
@@ -219,8 +242,8 @@ void validateQwen38(NSDictionary *manifest,
   validateTokenizer(root, descriptor, "qwen3_5_text");
 }
 
-void validateLayerTypes(NSDictionary *target,
-                        const Qwen3_6MoeLayout &layout) {
+template <class Layout>
+void validateLayerTypes(NSDictionary *target, const Layout &layout) {
   NSArray *types = requireArray(target, @"layer_types", "target layer_types");
   requireEqual(types.count, layout.layers, "target layer_types count");
   for (uint32_t layer = 0; layer < layout.layers; ++layer) {
@@ -235,17 +258,18 @@ void validateLayerTypes(NSDictionary *target,
   }
 }
 
+template <class Layout>
 void validateCaptureLayers(NSDictionary *draft) {
   NSArray *layers =
       requireArray(draft, @"target_capture_layers", "target capture layers");
-  requireEqual(layers.count, Qwen3_6MoeLayout::hiddenCaptureLayers.size(),
+  requireEqual(layers.count, Layout::hiddenCaptureLayers.size(),
                "target capture layer count");
   for (uint32_t index = 0; index < layers.count; ++index) {
     id value = layers[index];
     if (![value isKindOfClass:[NSNumber class]])
       throw std::invalid_argument("target capture layer must be an integer");
     requireEqual(static_cast<NSNumber *>(value).unsignedLongLongValue,
-                 Qwen3_6MoeLayout::hiddenCaptureLayers[index],
+                 Layout::hiddenCaptureLayers[index],
                  "target capture layer " + std::to_string(index));
   }
 }
@@ -312,8 +336,85 @@ void validateQwen36(NSDictionary *manifest,
                                  field.name),
                  field.value, field.name);
   }
-  validateCaptureLayers(draft);
+  validateCaptureLayers<Qwen3_6MoeLayout>(draft);
   validateTokenizer(root, descriptor, "qwen3_5_moe_text");
+}
+
+void validateQwen4Exp(NSDictionary *manifest,
+                      const std::filesystem::path &root,
+                      const ModelDescriptor &descriptor) {
+  requireEqual(requireUnsigned(manifest, @"schema_version", "schema_version"),
+               5, "schema_version");
+  NSDictionary *format =
+      requireObject(manifest, @"format", "model weight format");
+  requireEqual(requireUnsigned(format, @"q4_bits", "q4_bits"), 4, "q4_bits");
+  requireEqual(requireUnsigned(format, @"q8_bits", "q8_bits"), 8, "q8_bits");
+  requireEqual(requireUnsigned(format, @"quant_group_size",
+                               "quant_group_size"),
+               kQ4GroupElements, "quant_group_size");
+  requireEqual(requireUnsigned(format, @"storage_n", "storage_n"),
+               kQ4StorageN, "storage_n");
+  // Experts and the indexer tile narrower than everything else.
+  requireEqual(requireUnsigned(format, @"expert_storage_n",
+                               "expert_storage_n"),
+               kQ4ExpertStorageN, "expert_storage_n");
+  validateCommonFormat(format, Qwen4ExpLayout::layerMagic);
+
+  const auto &targetLayout = std::get<Qwen4ExpLayout>(descriptor.target);
+  NSDictionary *target =
+      requireObject(manifest, @"target", "target declaration");
+  requireEqual(requireString(target, @"architecture", "target architecture"),
+               "qwen4exp", "target architecture");
+  for (const GeometryField &field : std::to_array<GeometryField>(
+           {{"layers", targetLayout.layers},
+            {"hidden_size", targetLayout.hiddenSize},
+            {"vocabulary_size", targetLayout.vocabularySize},
+            {"gdn_actual_width", targetLayout.actualGdnWidth()},
+            {"gdn_packed_width", targetLayout.packedGdnWidth},
+            {"attention_packed_width", targetLayout.packedFullWidth},
+            {"experts", targetLayout.experts},
+            {"experts_per_token", targetLayout.expertsPerToken},
+            {"moe_intermediate_size", targetLayout.expertIntermediateSize},
+            {"shared_expert_intermediate_size",
+             targetLayout.expertIntermediateSize},
+            {"hyper_connection_count", targetLayout.hyperConnectionCount},
+            {"hyper_connection_low_rank",
+             targetLayout.hyperConnectionLowRank},
+            {"indexer_heads", targetLayout.indexerHeads},
+            {"indexer_kv_heads", targetLayout.indexerKvHeads},
+            {"indexer_head_dim", targetLayout.indexerHeadDimension},
+            {"ngram_layer", targetLayout.ngramLayer},
+            {"ngram_vocabulary_size", targetLayout.ngramVocabularySize},
+            {"ngram_embedding_size", targetLayout.ngramEmbeddingSize}})) {
+    requireEqual(requireUnsigned(target,
+                                 [NSString stringWithUTF8String:field.name],
+                                 field.name),
+                 field.value, field.name);
+  }
+  validateLayerTypes(target, targetLayout);
+
+  const DFlashDraftLayout &draftLayout = descriptor.draft;
+  NSDictionary *draft =
+      requireObject(manifest, @"draft", "draft declaration");
+  requireEqual(requireString(draft, @"architecture", "draft architecture"),
+               "DFlash2DraftModel", "draft architecture");
+  for (const GeometryField &field : std::to_array<GeometryField>(
+           {{"layers", draftLayout.layers},
+            {"hidden_size", draftLayout.hiddenSize},
+            {"intermediate_size", draftLayout.intermediateSize},
+            {"sliding_window", ExecutionLimits::draftContextTokens},
+            {"block_size", ExecutionLimits::draftQueryRows},
+            {"dynamic_conv_group_size", 16},
+            {"dynamic_conv_kernel_size", 2},
+            {"selector_rank", draftLayout.selectorRank},
+            {"selector_top_k", 16}})) {
+    requireEqual(requireUnsigned(draft,
+                                 [NSString stringWithUTF8String:field.name],
+                                 field.name),
+                 field.value, field.name);
+  }
+  validateCaptureLayers<Qwen4ExpLayout>(draft);
+  validateTokenizer(root, descriptor, "qwen4_exp_text");
 }
 
 } // namespace
@@ -389,6 +490,9 @@ ModelDescriptor inspectModelPackage(const std::filesystem::path &root) {
     } else if (format == "splash-packed-q4-moe") {
       descriptor = qwen36Descriptor(model);
       validateQwen36(manifest, root, descriptor);
+    } else if (format == "splash-packed-q4-qwen4exp") {
+      descriptor = qwen4expDescriptor(model);
+      validateQwen4Exp(manifest, root, descriptor);
     } else {
       throw std::invalid_argument("unsupported weight format: " + format);
     }

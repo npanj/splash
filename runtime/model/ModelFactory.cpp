@@ -32,9 +32,11 @@ ModelPackage loadPackage(metal::MetalBackend &backend,
     throw std::invalid_argument("model descriptor is invalid");
   result.target = std::visit(
       [&](const auto &layout) -> TargetWeights {
-        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(layout)>,
-                                     Qwen3_8Layout>)
+        using L = std::remove_cvref_t<decltype(layout)>;
+        if constexpr (std::is_same_v<L, Qwen3_8Layout>)
           return loadQwen3_8Weights(backend, root / "target", layout);
+        else if constexpr (std::is_same_v<L, Qwen4ExpLayout>)
+          return loadQwen4ExpWeights(backend, root / "target", layout);
         else
           return loadQwen3_6MoeWeights(backend, root / "target", layout);
       },

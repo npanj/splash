@@ -88,7 +88,8 @@ readQ8Projection(WeightFile &file, metal::MetalBackend &backend,
 [[nodiscard]] ops::ExpertQ4Projection
 readExpertQ4Projection(WeightFile &file, uint32_t experts,
                        uint32_t outputSize, uint32_t inputSize,
-                       std::string_view label);
+                       std::string_view label,
+                       uint32_t storageN = kQ4StorageN);
 
 [[nodiscard]] std::string
 weightManifestFingerprint(std::span<const WeightFileRecord> records);

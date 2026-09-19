@@ -4,6 +4,7 @@
 #include "Model.hpp"
 #include "Qwen3_6Moe.hpp"
 #include "Qwen3_8.hpp"
+#include "Qwen4Exp.hpp"
 #include "ops/Vision.hpp"
 
 #include <array>
@@ -14,7 +15,8 @@
 
 namespace splash::model {
 
-using TargetLayout = std::variant<Qwen3_8Layout, Qwen3_6MoeLayout>;
+using TargetLayout =
+    std::variant<Qwen3_8Layout, Qwen3_6MoeLayout, Qwen4ExpLayout>;
 
 // Package metadata validated before weight buffers are loaded. The engine
 // consumes capabilities; model loading consumes the concrete layouts.

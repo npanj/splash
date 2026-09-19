@@ -35,6 +35,7 @@ BACKEND_CONTROL_SOURCES := \
 MODEL_SOURCES := \
 	runtime/model/WeightStore.cpp \
 	runtime/model/Qwen3_6Moe.cpp \
+	runtime/model/Qwen4Exp.cpp \
 	runtime/model/Qwen3_8.cpp \
 	runtime/model/QwenVision.cpp \
 	runtime/model/QwenTarget.cpp \

@@ -288,8 +288,19 @@ struct Runtime::Impl {
         runtimeOverheadReserveBytes(value.runtimeOverheadReserveBytes),
         sampling(value.backend, geometry.target.vocabularySize, kDecodeRows),
         targetModel(std::visit(
-                        [&](const auto &weights) {
-                          return QwenTarget(weights, value.backend, operators);
+                        [&](const auto &weights) -> QwenTarget {
+                          using W = std::remove_cvref_t<decltype(weights)>;
+                          // qwen4exp packages load and plan, but its
+                          // hyper-connections, sparse-attention indexer and
+                          // n-gram module have no operators yet, so there is
+                          // nothing to execute.
+                          if constexpr (std::is_same_v<W, Qwen4ExpWeights>) {
+                            throw std::invalid_argument(
+                                "qwen4exp has no execution path yet");
+                          } else {
+                            return QwenTarget(weights, value.backend,
+                                              operators);
+                          }
                         },
                         value.package.target)),
         draftModel(value.package.draft, value.backend, operators) {

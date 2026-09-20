@@ -77,6 +77,7 @@ TEST_RESOURCES_TEST := $(ENGINE_TEST_BUILD)/runtime-resources
 TEST_METRICS_TEST := $(ENGINE_TEST_BUILD)/runtime-metrics
 TEST_MODEL_PACKAGE_TEST := $(ENGINE_TEST_BUILD)/model-package
 TEST_QWEN4EXP_LAYOUT_TEST := $(ENGINE_TEST_BUILD)/qwen4exp-layout
+TEST_QWEN4EXP_PACKAGE_TEST := $(ENGINE_TEST_BUILD)/qwen4exp-package
 TEST_MEMORY_AUDIT_TEST := $(ENGINE_TEST_BUILD)/memory-audit
 TEST_QWEN_STATE_TEST := $(ENGINE_TEST_BUILD)/qwen-state-storage
 TEST_STATUS_TEST := $(ENGINE_TEST_BUILD)/runtime-status
@@ -162,6 +163,7 @@ TEST_METAL_TARGETS := $(TEST_TUNING_WORKLOADS) \
 	$(TEST_LINEAR_PLAN) \
 	$(TEST_RESOURCES_TEST) \
 	$(TEST_MODEL_PACKAGE_TEST) \
+	$(TEST_QWEN4EXP_PACKAGE_TEST) \
 	$(TEST_QWEN_STATE_TEST) \
 	$(TEST_Q8_METAL_TEST) \
 	$(TEST_Q8_STORAGE_TEST) \
@@ -293,6 +295,15 @@ $(TEST_RESOURCES_TEST): dev/tests/engine/runtime_resources_test.mm \
 
 $(TEST_METRICS_TEST): dev/tests/engine/runtime_metrics_test.cpp | $(ENGINE_TEST_BUILD)
 	$(RUN_CONFIGURED) $(CXX) $(ENGINE_TEST_CXXFLAGS) $(TEST_INPUTS) -o $@
+
+$(TEST_QWEN4EXP_PACKAGE_TEST): runtime/metal/DeviceCapabilities.cpp \
+		runtime/metal/MetalBackend.mm \
+		$(MODEL_SOURCES) \
+		$(MODEL_OPERATOR_SOURCES) \
+		runtime/engine/MemoryPlan.cpp \
+		dev/tests/engine/qwen4exp_package_test.mm | $(ENGINE_TEST_BUILD)
+	$(RUN_CONFIGURED) $(CXX) $(ENGINE_TEST_CXXFLAGS) -fobjc-arc $(TEST_INPUTS) \
+		$(ENGINE_LINKFLAGS) -o $@
 
 $(TEST_MODEL_PACKAGE_TEST): runtime/metal/DeviceCapabilities.cpp \
 		runtime/metal/MetalBackend.mm \

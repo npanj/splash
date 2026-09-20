@@ -196,6 +196,11 @@ ModelDescriptor qwen38Descriptor(std::string name) {
                              DFlashDraftLayout{}, ops::VisionLayout{});
 }
 
+ModelDescriptor qwen38Q8Descriptor(std::string name) {
+  return makeModelDescriptor(std::move(name), Qwen3_8Q8Layout{},
+                             DFlashDraftLayout{}, ops::VisionLayout{});
+}
+
 ModelDescriptor qwen36Descriptor(std::string name) {
   constexpr Qwen3_6MoeLayout target;
   ops::VisionLayout vision;
@@ -239,6 +244,23 @@ void validateQwen38(NSDictionary *manifest,
   requireEqual(requireUnsigned(format, @"q4_storage_n", "q4_storage_n"),
                kQ4StorageN, "q4_storage_n");
   validateCommonFormat(format, Qwen3_8Layout::layerMagic);
+  validateTokenizer(root, descriptor, "qwen3_5_text");
+}
+
+void validateQwen38Q8(NSDictionary *manifest,
+                      const std::filesystem::path &root,
+                      const ModelDescriptor &descriptor) {
+  requireEqual(requireUnsigned(manifest, @"schema_version", "schema_version"),
+               5, "schema_version");
+  NSDictionary *format =
+      requireObject(manifest, @"format", "model weight format");
+  requireEqual(requireUnsigned(format, @"q8_bits", "q8_bits"), 8,
+               "q8_bits");
+  requireEqual(requireUnsigned(format, @"quant_group_size", "quant_group_size"),
+               kQ4GroupElements, "quant_group_size");
+  requireEqual(requireUnsigned(format, @"storage_n", "storage_n"),
+               kQ4StorageN, "storage_n");
+  validateCommonFormat(format, Qwen3_8Q8Layout::layerMagic);
   validateTokenizer(root, descriptor, "qwen3_5_text");
 }
 
@@ -487,6 +509,9 @@ ModelDescriptor inspectModelPackage(const std::filesystem::path &root) {
     if (format == "splash-packed-q4") {
       descriptor = qwen38Descriptor(model);
       validateQwen38(manifest, root, descriptor);
+    } else if (format == "splash-packed-q8") {
+      descriptor = qwen38Q8Descriptor(model);
+      validateQwen38Q8(manifest, root, descriptor);
     } else if (format == "splash-packed-q4-moe") {
       descriptor = qwen36Descriptor(model);
       validateQwen36(manifest, root, descriptor);

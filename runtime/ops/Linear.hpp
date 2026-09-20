@@ -7,6 +7,7 @@
 #include <compare>
 #include <span>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace splash::ops {
@@ -30,6 +31,8 @@ struct Q8Projection final {
   uint32_t outputSize = 0;
   uint32_t inputSize = 0;
 };
+
+using VocabularyProjection = std::variant<Q4Projection, Q8Projection>;
 
 // Expert-major Q4 slabs keep one complete StorageN-packed projection per
 // expert. The operator selects expertStrideBytes directly; no per-expert
@@ -168,6 +171,46 @@ public:
   void addResidualBatch(metal::CommandGraph &graph,
                         metal::MetalBuffer input,
                         const Q4Projection &projection,
+                        metal::MetalBuffer residual,
+                        metal::MetalBuffer output, LinearMatrix matrix,
+                        uint32_t lanes, Q4DispatchStats &stats) const;
+
+  void add(metal::CommandGraph &graph, LinearBuffers buffers,
+           const Q8Projection &projection, const LinearPlan &plan,
+           const Q8Projection *gate = nullptr,
+           Q4DispatchStats *stats = nullptr) const;
+  void addPrefill(metal::CommandGraph &graph, metal::MetalBuffer input,
+                  const Q8Projection &projection, metal::MetalBuffer output,
+                  metal::MetalBuffer sums, LinearMatrix matrix,
+                  uint32_t rows) const;
+  void addPrefillUpWithGate(
+      metal::CommandGraph &graph, metal::MetalBuffer input,
+      const Q8Projection &up, metal::MetalBuffer gateScratch,
+      metal::MetalBuffer output, metal::MetalBuffer sums,
+      metal::MetalBuffer downSums, LinearMatrix matrix,
+      uint32_t rows) const;
+  void addPrefillResidual(metal::CommandGraph &graph,
+                          metal::MetalBuffer input,
+                          const Q8Projection &projection,
+                          metal::MetalBuffer residual,
+                          metal::MetalBuffer output, metal::MetalBuffer sums,
+                          LinearMatrix matrix, uint32_t rows) const;
+  void addDecode(metal::CommandGraph &graph,
+                 metal::MetalBuffer input, const Q8Projection &projection,
+                 metal::MetalBuffer output, LinearMatrix matrix) const;
+  void addDecodeBatch(metal::CommandGraph &graph,
+                      metal::MetalBuffer input,
+                      const Q8Projection &projection,
+                      metal::MetalBuffer output, LinearMatrix matrix,
+                      uint32_t lanes, Q4DispatchStats &stats) const;
+  void addGateUpBatch(metal::CommandGraph &graph, metal::MetalBuffer input,
+                      const Q8Projection &gate, const Q8Projection &up,
+                      metal::MetalBuffer gateScratch,
+                      metal::MetalBuffer output, LinearMatrix matrix,
+                      uint32_t lanes, Q4DispatchStats &stats) const;
+  void addResidualBatch(metal::CommandGraph &graph,
+                        metal::MetalBuffer input,
+                        const Q8Projection &projection,
                         metal::MetalBuffer residual,
                         metal::MetalBuffer output, LinearMatrix matrix,
                         uint32_t lanes, Q4DispatchStats &stats) const;

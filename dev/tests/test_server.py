@@ -516,6 +516,7 @@ class Harness:
         thinking_codec=None,
         api_key=None,
         webui=True,
+        max_request_bytes=api.DEFAULT_MAX_REQUEST_BYTES,
     ):
         self.tokenizer = tokenizer or FakeTokenizer()
         runtime.pending_limit = queue_size
@@ -540,6 +541,7 @@ class Harness:
             request_capacity=queue_size,
             api_key=api_key,
             webui=webui,
+            max_request_bytes=max_request_bytes,
         )
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
@@ -2609,6 +2611,7 @@ class ServerTest(unittest.TestCase):
             allowed_host=[],
             api_key=None,
             no_webui=False,
+            max_request_size=api.DEFAULT_MAX_REQUEST_BYTES,
             port=0,
             binary="splash",
         )
@@ -2708,6 +2711,7 @@ class ServerTest(unittest.TestCase):
             allowed_host=[],
             api_key=None,
             no_webui=False,
+            max_request_size=api.DEFAULT_MAX_REQUEST_BYTES,
             port=0,
             binary="splash",
         )
@@ -2754,6 +2758,7 @@ class ServerTest(unittest.TestCase):
             allowed_host=[],
             api_key=None,
             no_webui=False,
+            max_request_size=api.DEFAULT_MAX_REQUEST_BYTES,
             port=8000,
             binary="splash",
         )
@@ -5296,8 +5301,8 @@ class ServerTest(unittest.TestCase):
         harness = self.harness(runtime)
         original = api.FrontendHandler._read_json_body
 
-        def read_body(handler):
-            body = original(handler)
+        def read_body(handler, deadline):
+            body = original(handler, deadline)
             time.sleep(0.05)
             return body
 
@@ -5327,7 +5332,7 @@ class ServerTest(unittest.TestCase):
         for length in (0, -1):
             status, _ = harness.raw_post(b"", length)
             self.assertEqual(status, 400)
-        status, _ = harness.raw_post(b"", api.MAX_REQUEST_BYTES + 1)
+        status, _ = harness.raw_post(b"", api.DEFAULT_MAX_REQUEST_BYTES + 1)
         self.assertEqual(status, 413)
         status, _ = harness.raw_post(b"\xff", 1)
         self.assertEqual(status, 400)
@@ -5405,7 +5410,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
 
     def test_http_body_is_exact_and_io_has_a_deadline(self):
-        harness = self.harness(FakeRuntime(), io_timeout=0.1)
+        harness = self.harness(FakeRuntime(), io_timeout=0.1, timeout=0.3)
         payload = json.dumps(self.body()).encode()
 
         digits = str(len(payload))
@@ -5514,7 +5519,9 @@ class ServerTest(unittest.TestCase):
                 self.addCleanup(connection.close)
                 connection.putrequest("POST", path)
                 connection.putheader("Content-Type", "application/json")
-                connection.putheader("Content-Length", str(api.MAX_REQUEST_BYTES))
+                connection.putheader(
+                    "Content-Length", str(api.DEFAULT_MAX_REQUEST_BYTES)
+                )
                 connection.endheaders()  # Do not send any body to an overloaded server.
                 response = connection.getresponse()
                 self.assertEqual(response.status, 503)

@@ -13,6 +13,37 @@ cached, returns the first token in 282 ms. Its kernels, draft model, and memory
 plan are specialized for each model it serves. That is why it is fast, and why
 there is nothing to configure.
 
+## Q8 fork: run the 8-bit model without compiling
+
+This branch adds 8-bit weight support. The release below is **prebuilt**:
+no Xcode, no Metal toolchain, no `make`. You need an Apple Silicon Mac on
+macOS 26.4 or later, and 48 GB of unified memory (64 GB recommended; the
+weights alone are 27 GB).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/npanj/splash/q8/install-q8.sh | sh
+splash-q8 serve --model nitinpanj/Qwen3.8-27B-Splash-HQ
+```
+
+- **What the installer does:** downloads the release archive from
+  [GitHub Releases](https://github.com/npanj/splash/releases/tag/1.0-q8),
+  checks its SHA-256, and installs a `splash-q8` command. It bundles its own
+  Python, so there's nothing else to install.
+- **It doesn't replace Homebrew's `splash`.** Both can live side by side and
+  share the downloaded model files.
+- **The first run downloads about 27 GB** from Hugging Face and verifies it.
+  Later runs start from disk.
+- **Downloaded the archive in a browser instead?** Unpack it and run
+  `xattr -dr com.apple.quarantine splash-1.0-q8-arm64-macos26`. Then start
+  `python/bin/python3 install/launcher.py serve --model nitinpanj/Qwen3.8-27B-Splash-HQ`
+  from inside that folder.
+- **Official 4-bit models still work:** `splash-q8 serve --model incoai/Qwen3.8-27B-Splash`.
+
+**Building from source instead?** `make -j4` needs full Xcode, not just the
+Command Line Tools. With Xcode 26 you also need the separate Metal toolchain:
+`xcodebuild -downloadComponent MetalToolchain`. If you see
+`cannot execute tool 'metal'` or `missing Metal Toolchain`, that is the fix.
+
 ## Quick start
 
 Apple M3 or newer, macOS 26.4 or later, [Homebrew](https://brew.sh), and 36 GB

@@ -10,6 +10,7 @@
 #include "ops/PagedKv.hpp"
 #include "ops/RoPE.hpp"
 #include "ops/Sampling.hpp"
+#include "ops/PromptLookup.hpp"
 #include "ops/Vision.hpp"
 
 #include <algorithm>
@@ -222,6 +223,7 @@ struct Runtime::Impl {
     uint64_t draftContextThrough = 0;
     std::optional<DraftContextPlan> draftContextPlan;
     std::vector<ImageState> images;
+    ops::PromptLookup promptLookup;
   };
 
   struct DecodeLaneResult final {
@@ -1508,6 +1510,8 @@ struct Runtime::Impl {
                            static_cast<uint32_t>(nextLength), 0, false}));
       entry.generatedTokens += laneResult.retained;
       entry.pendingToken = laneResult.nextAnchor;
+      for (uint32_t tok : output)
+        entry.promptLookup.appendToken(tok);
       entry.maskWords.clear();
       entry.verifyMaskInFlight = false;
       entry.decodeStage = DecodeStage::Regular;
@@ -1811,6 +1815,7 @@ StateAdmission Runtime::resume(const ModelRequest &request) {
     entry.slot = *admission.cell;
     entry.resident = true;
     entry.promptTokens = static_cast<uint32_t>(request.prompt.size());
+    entry.promptLookup.indexPrompt(request.prompt);
     if (auto staged = impl_->stagedImages.find(request.id);
         staged != impl_->stagedImages.end()) {
       entry.images = std::move(staged->second);
@@ -1831,6 +1836,7 @@ metal::AllocationResult Runtime::beginAt(const ModelRequest &request, uint32_t s
   Impl::Request entry;
   entry.id = request.id;
   entry.promptTokens = static_cast<uint32_t>(request.prompt.size());
+  entry.promptLookup.indexPrompt(request.prompt);
   entry.maxNewTokens = request.maxNewTokens;
   entry.cohort = request.cohort;
   entry.sampling = request.sampling;
@@ -2153,6 +2159,54 @@ Runtime::decodeAsync(const BatchPlan &plan,
     impl_->loadPolicyBuffers(entry, lane, {});
     laneResult.draftComputed = true;
     laneResult.verify = true;
+  }
+
+  static const bool pldEnabled = [] {
+    const char *v = std::getenv("SPLASH_PROMPT_LOOKUP");
+    return v == nullptr || std::atoi(v) != 0;
+  }();
+
+  if (pldEnabled && !lanes.empty()) {
+    bool allMatched = true;
+    for (uint32_t lane = 0; lane < lanes.size(); ++lane) {
+      Impl::DecodeLaneResult &laneResult = lanes[lane];
+      if (!laneResult.draftComputed || !laneResult.request || !laneResult.request->pendingToken) {
+        allMatched = false;
+        break;
+      }
+      Impl::Request &entry = *laneResult.request;
+      const uint32_t anchor = *entry.pendingToken;
+      std::array<uint32_t, 1> queryTokens{anchor};
+      std::array<uint32_t, kDraftProposalTokens> pldDrafts{};
+      const uint32_t pldFound = entry.promptLookup.propose(
+          queryTokens, pldDrafts, kDraftProposalTokens);
+      if (pldFound >= 2) {
+        uint32_t *proposed = contents<uint32_t>(
+            impl_->decodeArena->get(lane, DecodeTensor::ProposedTokens), "pld proposals");
+        float *probs = contents<float>(
+            impl_->decodeArena->get(lane, DecodeTensor::ProposalProbs), "pld probs");
+        uint32_t *candidates = contents<uint32_t>(
+            impl_->decodeArena->get(lane, DecodeTensor::Candidates), "pld candidates");
+        for (uint32_t j = 0; j < kDraftProposalTokens; ++j) {
+          const uint32_t tok = (j < pldFound) ? pldDrafts[j] : UINT32_MAX;
+          proposed[j] = tok;
+          candidates[j * 16 + 0] = tok;
+          probs[j * 16 + 0] = (j < pldFound) ? 1.0f : 1e9f;
+          for (uint32_t c = 1; c < 16; ++c) {
+            candidates[j * 16 + c] = UINT32_MAX;
+            probs[j * 16 + c] = 0.0f;
+          }
+        }
+      } else {
+        allMatched = false;
+        break;
+      }
+    }
+    if (allMatched) {
+      for (auto &lane : lanes) {
+        lane.draftComputed = false;
+      }
+    }
   }
 
   CommandGraph commandGraph;

@@ -209,6 +209,7 @@ ENGINE_CPP_SOURCES := \
 	runtime/ops/PagedAttention.cpp \
 	runtime/ops/RoPE.cpp \
 	runtime/ops/Sampling.cpp \
+	runtime/ops/PromptLookup.cpp \
 	runtime/metal/DeviceCapabilities.cpp \
 	runtime/engine/MemoryPlan.cpp \
 	runtime/engine/Scheduler.cpp \

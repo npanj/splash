@@ -2163,7 +2163,7 @@ Runtime::decodeAsync(const BatchPlan &plan,
 
   static const bool pldEnabled = [] {
     const char *v = std::getenv("SPLASH_PROMPT_LOOKUP");
-    return v == nullptr || std::atoi(v) != 0;
+    return v != nullptr && std::atoi(v) != 0;
   }();
 
   if (pldEnabled && !constrained && !lanes.empty()) {

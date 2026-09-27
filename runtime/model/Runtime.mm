@@ -2166,7 +2166,7 @@ Runtime::decodeAsync(const BatchPlan &plan,
     return v == nullptr || std::atoi(v) != 0;
   }();
 
-  if (pldEnabled && !lanes.empty()) {
+  if (pldEnabled && !constrained && !lanes.empty()) {
     bool allMatched = true;
     for (uint32_t lane = 0; lane < lanes.size(); ++lane) {
       Impl::DecodeLaneResult &laneResult = lanes[lane];

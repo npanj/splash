@@ -1216,7 +1216,11 @@ CommandTicket MetalBackend::submitCommandAsync(
     CommandCompletion completion) {
     impl_->checkCancellation();
     if (dispatches.empty()) {
-        throw MetalBackendError("Metal command must contain a dispatch");
+        auto ticketState = std::make_shared<CommandTicket::State>();
+        ticketState->timing = {};
+        ticketState->completed = true;
+        if (completion) completion(0);
+        return CommandTicket(std::move(ticketState));
     }
     if (impl_->dispatchProfiling && dispatches.size() > 1) {
         // Replay serially, one command per dispatch, then hand back an
